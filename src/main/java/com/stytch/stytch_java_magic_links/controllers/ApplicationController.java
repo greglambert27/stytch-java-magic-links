@@ -1,14 +1,17 @@
 package com.stytch.stytch_java_magic_links.controllers;
 
+import com.stytch.java.b2b.models.passwordsemail.ResetResponse;
 import com.stytch.java.common.StytchException;
 import com.stytch.java.consumer.models.magiclinks.AuthenticateResponse;
 import com.stytch.java.consumer.models.users.GetResponse;
 import com.stytch.java.consumer.models.users.UpdateResponse;
 import com.stytch.stytch_java_magic_links.models.EditForm;
 import com.stytch.stytch_java_magic_links.models.LoginForm;
+import com.stytch.stytch_java_magic_links.services.StytchB2BService;
 import com.stytch.stytch_java_magic_links.services.StytchService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.util.concurrent.ExecutionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -27,6 +30,9 @@ public class ApplicationController {
     @Autowired
     private StytchService authenticationService;
 
+    @Autowired
+    private StytchB2BService authenticateB2BService;
+
     @GetMapping("/")
     public String index() {
         return "index";
@@ -43,14 +49,32 @@ public class ApplicationController {
     }
 
     @GetMapping("/authenticate")
-    public String authenticate(String token, HttpServletResponse response) {
+    public String authenticate(String token, String stytch_token_type,
+        HttpServletResponse response) {
         try {
-            AuthenticateResponse authResponse = authenticationService.authenticateToken(token);
-            ResponseCookie cookie = generateJwtCookie(authResponse.getSessionJwt(), 30 * 60);
-            response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
-            return "authenticated";
+            if (stytch_token_type.equals("multi_tenant_passwords")) {
+                return "reset";
+            } else {
+                com.stytch.java.b2b.models.magiclinks.AuthenticateResponse authResponse = authenticateB2BService.authenticateToken(
+                    token);
+                ResponseCookie cookie = generateJwtCookie(authResponse.getSessionJwt(), 30 * 60);
+                response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+                return "authenticated";
+            }
         } catch (Exception e) {
             return handleException(e);
+        }
+    }
+
+    @PostMapping("/reset")
+    public String resetPassword(String token, String password, HttpServletResponse response) {
+        try {
+            ResetResponse resetResponse = authenticateB2BService.resetPassword(token, password);
+            ResponseCookie cookie = generateJwtCookie(resetResponse.getSessionJwt(), 30 * 60);
+            response.addHeader(HttpHeaders.SET_COOKIE, cookie.toString());
+            return "passwordReset";
+        } catch (ExecutionException | InterruptedException | StytchException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -70,7 +94,8 @@ public class ApplicationController {
     public String profile(@ModelAttribute EditForm editForm, HttpServletRequest request) {
         try {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            UpdateResponse updateResponse = authenticationService.updateUser(authentication.getName(), editForm.firstName, editForm.lastName);
+            UpdateResponse updateResponse = authenticationService.updateUser(
+                authentication.getName(), editForm.firstName, editForm.lastName);
             request.getSession(false).setAttribute("user", updateResponse.getUser());
             return "profile";
         } catch (Exception e) {
